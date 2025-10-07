@@ -1,0 +1,19 @@
+{
+    "compilerOptions": {
+        "target": "ESNext",
+        "module": "ESNext",
+        "lib": [
+            "ESNext"
+        ], // Remove "DOM" and "WebWorker" to avoid conflicts
+        "types": [
+            "@cloudflare/workers-types"
+        ],
+        "moduleResolution": "node",
+        "esModuleInterop": true,
+        "strict": true,
+        "noImplicitAny": true
+    },
+    "include": [
+        "index.ts"
+    ]
+}

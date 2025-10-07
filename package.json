@@ -1,0 +1,17 @@
+{
+  "name": "uglink-worker",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "npx tsc src/index.ts --outDir dist --target ES2020 --module ES2020 --moduleResolution node",
+    "dev": "bun run build && wrangler dev",
+    "deploy": "bun run build && wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/workers-types": "^4.20251004.0",
+    "jsencrypt": "^3.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.0",
+    "typescript": "^5.9.3"
+  }
+}
