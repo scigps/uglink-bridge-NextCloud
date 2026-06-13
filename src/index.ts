@@ -115,8 +115,13 @@ export default {
         const redirectUrl = data.data.redirect_url;
 
         const redirectResponse = await fetch(redirectUrl, { redirect: 'manual' });
-
-        const setCookie = redirectResponse.headers.get('set-cookie');
+        // Log the redirect response for debugging
+        console.log("Redirect Response:", redirectResponse);
+        const redirectHtml = await redirectResponse.text();
+        const cookieMatch = redirectHtml.match(/document\.cookie\s*=\s*['"]([^'"]*ugreen-proxy-token=[^'"]*)['"]/i);
+        const setCookie = cookieMatch ? cookieMatch[1] : null;
+        // Log the parsed cookie string for debugging
+        console.log("Parsed Set-Cookie:", setCookie);
 
         if (setCookie) {
           proxyCookie = setCookie;
@@ -125,8 +130,8 @@ export default {
           await env.UGLINK_CACHE.put(cookieCacheKey, proxyCookie, { expirationTtl: 3600 });
           await env.UGLINK_CACHE.put(originCacheKey, proxyOrigin, { expirationTtl: 3600 });
         } else {
-          console.error('UGLINK Worker: No set-cookie in redirect response');
-          return new Response('No set-cookie in redirect response', { status: 500 });
+          console.error('UGLINK Worker: No set-cookie in redirect response body');
+          return new Response('No set-cookie in redirect response body', { status: 500 });
         }
       } else {
         console.error('UGLINK Worker: API returned error', { msg: data.msg });
