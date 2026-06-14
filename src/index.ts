@@ -165,8 +165,38 @@ export default {
     const proxyResponse = await fetch(proxyUrl, {
       method: request.method,
       headers: proxyHeaders,
-      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined
+      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+      redirect: 'manual'  // Intercept redirects to rewrite Location header
     });
+
+    // Handle redirect responses (301, 302, 303, 307, 308)
+    if ([301, 302, 303, 307, 308].includes(proxyResponse.status)) {
+      const location = proxyResponse.headers.get('Location');
+      if (location) {
+        // Rewrite Location header to use Workers domain
+        const originUrl = new URL(proxyOrigin);
+        const workersUrl = new URL(request.url);
+        
+        let newLocation = location;
+        // If location is absolute URL pointing to origin, rewrite to workers domain
+        if (location.startsWith(originUrl.origin)) {
+          newLocation = location.replace(originUrl.origin, `${workersUrl.protocol}//${workersUrl.host}`);
+        } else if (location.startsWith('/')) {
+          // If location is relative path, keep as is (will be handled by browser through workers)
+          newLocation = location;
+        }
+        
+        // Create redirect response with rewritten Location
+        const redirectHeaders = new Headers(proxyResponse.headers);
+        redirectHeaders.set('Location', newLocation);
+        
+        return new Response(null, {
+          status: proxyResponse.status,
+          statusText: proxyResponse.statusText,
+          headers: redirectHeaders
+        });
+      }
+    }
 
     // Forward all Set-Cookie headers from origin server to browser
     const responseHeaders = new Headers(proxyResponse.headers);
