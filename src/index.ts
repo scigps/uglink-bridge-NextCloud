@@ -180,8 +180,26 @@ export default {
       mergedCookie = clientCookies ? `${clientCookies}; ${proxyCookie}` : proxyCookie;
     } else {
       console.log(`UGLINK Worker: Client already has ugreen-proxy-token`);
-      // Client has token, keep it as is
-      mergedCookie = clientCookies;
+      // Client has token, but check if it matches the cached one
+      // Extract token value from client cookies and cached cookie
+      const clientTokenMatch = clientCookies.match(/ugreen-proxy-token=([^;]+)/);
+      const cachedTokenMatch = proxyCookie.match(/ugreen-proxy-token=([^;]+)/);
+      
+      if (clientTokenMatch && cachedTokenMatch) {
+        const clientToken = clientTokenMatch[1];
+        const cachedToken = cachedTokenMatch[1];
+        
+        if (clientToken !== cachedToken) {
+          console.log(`UGLINK Worker: Client token differs from cached token, using cached token`);
+          // Replace client's old token with cached new token
+          mergedCookie = clientCookies.replace(/ugreen-proxy-token=[^;]+/, 'ugreen-proxy-token=' + cachedToken);
+        } else {
+          console.log(`UGLINK Worker: Client token matches cached token, keeping client cookies`);
+          mergedCookie = clientCookies;
+        }
+      } else {
+        mergedCookie = clientCookies;
+      }
     }
     
     proxyHeaders.set('Cookie', mergedCookie);
