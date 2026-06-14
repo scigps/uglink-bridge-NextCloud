@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "uglink-worker-test",
+      "name": "nextcloud-test",
       "dependencies": {
         "@cloudflare/workers-types": "^4.20251004.0",
         "jsencrypt": "^3.5.4",

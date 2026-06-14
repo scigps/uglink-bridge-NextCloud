@@ -1,5 +1,5 @@
 {
-  "name": "uglink-worker",
+  "name": "nextcloud",
   "version": "1.0.0",
   "scripts": {
     "build": "npx tsc src/index.ts --outDir dist --target ES2020 --module ES2020 --moduleResolution node",
