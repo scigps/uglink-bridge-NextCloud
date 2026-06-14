@@ -201,15 +201,20 @@ export default {
     }
     //客户端没有token，且源站也没有新token，则添加缓存的token
     if (!hasToken && !hasOriginToken) {
-        finalSetCookies.push(fixCookieDomain(proxyCookie));
-    } 
+      finalSetCookies.push(fixCookieDomain(proxyCookie));
+    }
     //如果源站有新token（无论客户端有没有token），都不添加缓存的token，直接用origin的token（已经在上面添加了）
     //客户端没有token，且源站没有要求发其它Set-Cookie，则发缓存token，已添加
     //客户端有token，且源站没有要求发其它Set-Cookie（finalSetCookies为空），说明token没变，就不会触发删除Set-Cookie，不用动作
-
+    
     // Set all cookies in response
     if (finalSetCookies.length > 0) {
       responseHeaders.delete('Set-Cookie');
+
+      //添加浏览器 SameSite Cookie
+      finalSetCookies.push('__Host-nc_sameSiteCookiestrict=true; Path=/; Secure; SameSite=Strict');
+      finalSetCookies.push('__Host-nc_sameSiteCookielax=true; Path=/; Secure; SameSite=Lax');
+
       for (const cookie of finalSetCookies) {
         responseHeaders.append('Set-Cookie', cookie);
       }
