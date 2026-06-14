@@ -170,10 +170,17 @@ export default {
     console.log(`UGLINK Worker: Cached proxyCookie (first 100 chars): ${proxyCookie ? proxyCookie.substring(0, 100) : 'NULL'}...`);
     console.log(`UGLINK Worker: proxyCookie is null/undefined: ${!proxyCookie}`);
     
+    // Check if this is a login request
+    const isLoginRequest = url.pathname === '/login' && request.method === 'POST';
+    
     // Ensure ugreen-proxy-token is always present for Ugreen authentication
     if (!proxyCookie) {
       console.error(`UGLINK Worker: ERROR - No cached ugreen-proxy-token in KV!`);
       mergedCookie = clientCookies;
+    } else if (isLoginRequest) {
+      // Login request: only send ugreen-proxy-token, clear other cookies to establish new session
+      console.log(`UGLINK Worker: Login request detected, clearing client cookies and using only ugreen-proxy-token`);
+      mergedCookie = proxyCookie;
     } else if (!clientCookies.includes('ugreen-proxy-token')) {
       console.log(`UGLINK Worker: Client missing ugreen-proxy-token, adding from cache`);
       // Add cached token to client cookies
@@ -215,6 +222,17 @@ export default {
     });
 
     console.log(`UGLINK Worker: Proxy Response Status: ${proxyResponse.status}`);
+    
+    // Log all Set-Cookie headers from Ugreen response
+    const setCookies = proxyResponse.headers.getSetCookie();
+    if (setCookies.length > 0) {
+      console.log(`UGLINK Worker: Ugreen returned ${setCookies.length} Set-Cookie header(s)`);
+      setCookies.forEach((cookie, index) => {
+        console.log(`UGLINK Worker: Set-Cookie [${index}]: ${cookie.substring(0, 200)}...`);
+      });
+    } else {
+      console.log(`UGLINK Worker: Ugreen returned NO Set-Cookie headers`);
+    }
     
     // Handle redirect responses (301, 302, 303, 307, 308)
     if ([301, 302, 303, 307, 308].includes(proxyResponse.status)) {
