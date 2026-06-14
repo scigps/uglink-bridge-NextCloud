@@ -155,12 +155,32 @@ export default {
     const proxyHeaders = new Headers();
     for (const [key, value] of request.headers) {
       if (key.toLowerCase() === 'host') continue; // Don't forward host
+      if (key.toLowerCase() === 'cookie') continue; // Will handle cookie separately
       if (key.toLowerCase().startsWith('cf-')) continue; // Don't forward Cloudflare headers
       if (key.toLowerCase().startsWith('x-forwarded-')) continue; // Don't forward forwarded headers
       proxyHeaders.set(key, value);
     }
     proxyHeaders.set('Host', new URL(proxyOrigin).host);
-    proxyHeaders.set('Cookie', proxyCookie);
+    
+    // Merge client cookies with cached ugreen-proxy-token
+    const clientCookies = request.headers.get('Cookie') || '';
+    let mergedCookie = clientCookies;
+    
+    // Ensure ugreen-proxy-token is in the cookie (from cache if not present in client)
+    if (!clientCookies.includes('ugreen-proxy-token')) {
+      // Add cached token to client cookies
+      mergedCookie = clientCookies ? `${clientCookies}; ${proxyCookie}` : proxyCookie;
+    } else {
+      // Client has token, but ensure we use the latest from cache if different
+      // Extract token name from proxyCookie
+      const tokenName = proxyCookie.split('=')[0].trim();
+      if (!clientCookies.includes(tokenName)) {
+        mergedCookie = `${clientCookies}; ${proxyCookie}`;
+      }
+    }
+    
+    proxyHeaders.set('Cookie', mergedCookie);
+    console.log(`UGLINK Worker: Proxy Cookie: ${mergedCookie.substring(0, 100)}...`);
 
     const proxyResponse = await fetch(proxyUrl, {
       method: request.method,
@@ -172,6 +192,8 @@ export default {
     // Handle redirect responses (301, 302, 303, 307, 308)
     if ([301, 302, 303, 307, 308].includes(proxyResponse.status)) {
       const location = proxyResponse.headers.get('Location');
+      console.log(`UGLINK Worker: Redirect detected - Status: ${proxyResponse.status}, Location: ${location}`);
+      
       if (location) {
         // Rewrite Location header to use Workers domain
         const originUrl = new URL(proxyOrigin);
@@ -181,9 +203,10 @@ export default {
         // If location is absolute URL pointing to origin, rewrite to workers domain
         if (location.startsWith(originUrl.origin)) {
           newLocation = location.replace(originUrl.origin, `${workersUrl.protocol}//${workersUrl.host}`);
+          console.log(`UGLINK Worker: Rewrote absolute Location: ${location} -> ${newLocation}`);
         } else if (location.startsWith('/')) {
           // If location is relative path, keep as is (will be handled by browser through workers)
-          newLocation = location;
+          console.log(`UGLINK Worker: Keeping relative Location: ${location}`);
         }
         
         // Create redirect response with rewritten Location
@@ -204,8 +227,7 @@ export default {
     // Get all Set-Cookie headers from origin response
     const originSetCookies = proxyResponse.headers.getSetCookie();
     
-    // Check if client request has ugreen-proxy-token
-    const clientCookies = request.headers.get('Cookie') || '';
+    // Check if client request has ugreen-proxy-token (reuse existing clientCookies variable)
     const hasToken = clientCookies.includes('ugreen-proxy-token');
     
     // Build final Set-Cookie array with deduplication
