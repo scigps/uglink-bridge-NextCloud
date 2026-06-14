@@ -166,22 +166,24 @@ export default {
     const clientCookies = request.headers.get('Cookie') || '';
     let mergedCookie = clientCookies;
     
-    // Ensure ugreen-proxy-token is in the cookie (from cache if not present in client)
+    console.log(`UGLINK Worker: Client Cookies (first 100 chars): ${clientCookies.substring(0, 100)}...`);
+    console.log(`UGLINK Worker: Cached proxyCookie (first 100 chars): ${proxyCookie.substring(0, 100)}...`);
+    
+    // Ensure ugreen-proxy-token is always present for Ugreen authentication
     if (!clientCookies.includes('ugreen-proxy-token')) {
+      console.log(`UGLINK Worker: Client missing ugreen-proxy-token, adding from cache`);
       // Add cached token to client cookies
       mergedCookie = clientCookies ? `${clientCookies}; ${proxyCookie}` : proxyCookie;
     } else {
-      // Client has token, but ensure we use the latest from cache if different
-      // Extract token name from proxyCookie
-      const tokenName = proxyCookie.split('=')[0].trim();
-      if (!clientCookies.includes(tokenName)) {
-        mergedCookie = `${clientCookies}; ${proxyCookie}`;
-      }
+      console.log(`UGLINK Worker: Client already has ugreen-proxy-token`);
+      // Client has token, keep it as is
+      mergedCookie = clientCookies;
     }
     
     proxyHeaders.set('Cookie', mergedCookie);
-    console.log(`UGLINK Worker: Proxy Cookie: ${mergedCookie.substring(0, 100)}...`);
-
+    console.log(`UGLINK Worker: Merged Cookie (first 150 chars): ${mergedCookie.substring(0, 150)}...`);
+    console.log(`UGLINK Worker: Request Method: ${request.method}, Path: ${url.pathname}`);
+    
     const proxyResponse = await fetch(proxyUrl, {
       method: request.method,
       headers: proxyHeaders,
@@ -189,10 +191,14 @@ export default {
       redirect: 'manual'  // Intercept redirects to rewrite Location header
     });
 
+    console.log(`UGLINK Worker: Proxy Response Status: ${proxyResponse.status}`);
+    
     // Handle redirect responses (301, 302, 303, 307, 308)
     if ([301, 302, 303, 307, 308].includes(proxyResponse.status)) {
       const location = proxyResponse.headers.get('Location');
       console.log(`UGLINK Worker: Redirect detected - Status: ${proxyResponse.status}, Location: ${location}`);
+      console.log(`UGLINK Worker: Request URL: ${request.url}`);
+      console.log(`UGLINK Worker: Proxy URL: ${proxyUrl}`);
       
       if (location) {
         // Rewrite Location header to use Workers domain
@@ -213,6 +219,7 @@ export default {
         const redirectHeaders = new Headers(proxyResponse.headers);
         redirectHeaders.set('Location', newLocation);
         
+        console.log(`UGLINK Worker: Returning redirect response with Location: ${newLocation}`);
         return new Response(null, {
           status: proxyResponse.status,
           statusText: proxyResponse.statusText,
