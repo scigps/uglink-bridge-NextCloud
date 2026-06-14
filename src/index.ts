@@ -204,6 +204,7 @@ export default {
     
     proxyHeaders.set('Cookie', mergedCookie);
     console.log(`UGLINK Worker: Merged Cookie length: ${mergedCookie.length}, first 150 chars: ${mergedCookie.substring(0, 150)}...`);
+    console.log(`UGLINK Worker: Full Merged Cookie: ${mergedCookie}`);
     console.log(`UGLINK Worker: Request Method: ${request.method}, Path: ${url.pathname}`);
     
     const proxyResponse = await fetch(proxyUrl, {
