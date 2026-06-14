@@ -160,6 +160,14 @@ export default {
       body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined
     });
 
-    return proxyResponse;
+    // Forward Set-Cookie header to browser
+    const responseHeaders = new Headers(proxyResponse.headers);
+    responseHeaders.set('Set-Cookie', proxyCookie);
+
+    return new Response(proxyResponse.body, {
+      status: proxyResponse.status,
+      statusText: proxyResponse.statusText,
+      headers: responseHeaders
+    });
   }
 };
