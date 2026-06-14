@@ -271,8 +271,8 @@ export default {
     // Check if client request has ugreen-proxy-token (reuse existing clientCookies variable)
     const hasToken = clientCookies.includes('ugreen-proxy-token');
     
-    // Build final Set-Cookie array with deduplication
-    const finalSetCookies = [];
+    // Build final Set-Cookie map with deduplication (keep last value for each cookie name)
+    const cookieMap = new Map<string, string>();
     let hasOriginToken = false;
     
     // First, add all origin Set-Cookie headers (passthrough)
@@ -283,15 +283,19 @@ export default {
       if (cookieName === 'ugreen-proxy-token') {
         // Origin sent new token, use it instead of cached one
         hasOriginToken = true;
-        finalSetCookies.push(fixCookieDomain(cookie));
+        cookieMap.set(cookieName, fixCookieDomain(cookie));
         
         // Update cache with new token (async, don't wait)
         ctx.waitUntil(env.UGLINK_CACHE.put(cookieCacheKey, fixCookieDomain(cookie), { expirationTtl: 3600 }));
       } else {
-        // Add other cookies directly
-        finalSetCookies.push(fixCookieDomain(cookie));
+        // Add other cookies directly (later duplicates will overwrite earlier ones)
+        cookieMap.set(cookieName, fixCookieDomain(cookie));
       }
     }
+    
+    // Convert map to array
+    const finalSetCookies = Array.from(cookieMap.values());
+    
     //客户端没有token，且源站也没有新token，则添加缓存的token
     if (!hasToken && !hasOriginToken) {
       finalSetCookies.push(fixCookieDomain(proxyCookie));
