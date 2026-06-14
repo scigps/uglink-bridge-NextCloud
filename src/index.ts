@@ -170,17 +170,10 @@ export default {
     console.log(`UGLINK Worker: Cached proxyCookie (first 100 chars): ${proxyCookie ? proxyCookie.substring(0, 100) : 'NULL'}...`);
     console.log(`UGLINK Worker: proxyCookie is null/undefined: ${!proxyCookie}`);
     
-    // Check if this is a login request
-    const isLoginRequest = url.pathname === '/login' && request.method === 'POST';
-    
     // Ensure ugreen-proxy-token is always present for Ugreen authentication
     if (!proxyCookie) {
       console.error(`UGLINK Worker: ERROR - No cached ugreen-proxy-token in KV!`);
       mergedCookie = clientCookies;
-    } else if (isLoginRequest) {
-      // Login request: only send ugreen-proxy-token, clear other cookies to establish new session
-      console.log(`UGLINK Worker: Login request detected, clearing client cookies and using only ugreen-proxy-token`);
-      mergedCookie = proxyCookie;
     } else if (!clientCookies.includes('ugreen-proxy-token')) {
       console.log(`UGLINK Worker: Client missing ugreen-proxy-token, adding from cache`);
       // Add cached token to client cookies
