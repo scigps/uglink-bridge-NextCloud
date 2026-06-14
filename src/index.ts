@@ -167,10 +167,14 @@ export default {
     let mergedCookie = clientCookies;
     
     console.log(`UGLINK Worker: Client Cookies (first 100 chars): ${clientCookies.substring(0, 100)}...`);
-    console.log(`UGLINK Worker: Cached proxyCookie (first 100 chars): ${proxyCookie.substring(0, 100)}...`);
+    console.log(`UGLINK Worker: Cached proxyCookie (first 100 chars): ${proxyCookie ? proxyCookie.substring(0, 100) : 'NULL'}...`);
+    console.log(`UGLINK Worker: proxyCookie is null/undefined: ${!proxyCookie}`);
     
     // Ensure ugreen-proxy-token is always present for Ugreen authentication
-    if (!clientCookies.includes('ugreen-proxy-token')) {
+    if (!proxyCookie) {
+      console.error(`UGLINK Worker: ERROR - No cached ugreen-proxy-token in KV!`);
+      mergedCookie = clientCookies;
+    } else if (!clientCookies.includes('ugreen-proxy-token')) {
       console.log(`UGLINK Worker: Client missing ugreen-proxy-token, adding from cache`);
       // Add cached token to client cookies
       mergedCookie = clientCookies ? `${clientCookies}; ${proxyCookie}` : proxyCookie;
@@ -181,7 +185,7 @@ export default {
     }
     
     proxyHeaders.set('Cookie', mergedCookie);
-    console.log(`UGLINK Worker: Merged Cookie (first 150 chars): ${mergedCookie.substring(0, 150)}...`);
+    console.log(`UGLINK Worker: Merged Cookie length: ${mergedCookie.length}, first 150 chars: ${mergedCookie.substring(0, 150)}...`);
     console.log(`UGLINK Worker: Request Method: ${request.method}, Path: ${url.pathname}`);
     
     const proxyResponse = await fetch(proxyUrl, {
