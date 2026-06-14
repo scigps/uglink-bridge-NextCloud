@@ -224,7 +224,7 @@ export default {
         console.log(`UGLINK Worker: Set-Cookie [${index}]: ${cookie.substring(0, 200)}...`);
       });
     } else {
-      console.log(`UGLINK Worker: Ugreen returned NO Set-Cookie headers`);
+      console.log(`UGLINK Worker: Ugreen returned NO Set-Cookie headers for ${request.method} ${url.pathname}`);
     }
     
     // Handle redirect responses (301, 302, 303, 307, 308)
@@ -304,8 +304,8 @@ export default {
     if (finalSetCookies.length > 0) {
       responseHeaders.delete('Set-Cookie');
 
-      //添加浏览器 SameSite Cookie
-      finalSetCookies.push('__Host-nc_sameSiteCookiestrict=true; Path=/; Secure; SameSite=Strict');
+      //添加浏览器 SameSite Cookie - 使用 Lax 以允许 POST 表单提交时携带
+      finalSetCookies.push('__Host-nc_sameSiteCookiestrict=true; Path=/; Secure; SameSite=Lax');
       finalSetCookies.push('__Host-nc_sameSiteCookielax=true; Path=/; Secure; SameSite=Lax');
 
       for (const cookie of finalSetCookies) {
