@@ -1,5 +1,13 @@
 import JSEncrypt from 'jsencrypt';
 
+// Helper function to fix cookie domain
+function fixCookieDomain(cookie: string): string {
+  if (cookie.includes('Domain=')) {
+    return cookie.replace(/;\s*Domain=[^;]+/gi, '');
+  }
+  return cookie;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const baseUrl = env.BASE_URL;
@@ -9,7 +17,7 @@ export default {
     const cookieCacheKey = 'proxy_cookie';
     const originCacheKey = 'proxy_origin';
 
-    // Check cache
+    // Check cache - only store ugreen-proxy-token
     let proxyCookie = await env.UGLINK_CACHE.get(cookieCacheKey);
     let proxyOrigin = await env.UGLINK_CACHE.get(originCacheKey);
 
@@ -115,16 +123,16 @@ export default {
         const redirectUrl = data.data.redirect_url;
 
         const redirectResponse = await fetch(redirectUrl, { redirect: 'manual' });
-        // Log the redirect response for debugging
-        console.log("Redirect Response:", redirectResponse);
         const redirectHtml = await redirectResponse.text();
+        
+        // Extract all cookies from document.cookie assignment
         const cookieMatch = redirectHtml.match(/document\.cookie\s*=\s*'([^']+)'/);
         const setCookie = cookieMatch ? cookieMatch[1] : null;
         // Log the parsed cookie string for debugging
         console.log("Parsed Set-Cookie:", setCookie);
-
+          
         if (setCookie) {
-          proxyCookie = setCookie;
+          proxyCookie = fixCookieDomain(setCookie);
           proxyOrigin = new URL(redirectUrl).origin;
           // Cache proxy cookie and origin for 1 hour
           await env.UGLINK_CACHE.put(cookieCacheKey, proxyCookie, { expirationTtl: 3600 });
@@ -160,16 +168,52 @@ export default {
       body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined
     });
 
-    // Forward Set-Cookie header to browser
+    // Forward all Set-Cookie headers from origin server to browser
     const responseHeaders = new Headers(proxyResponse.headers);
     
-    // Parse and fix cookie domain to match current request domain
-    let fixedCookie = proxyCookie;
-    if (proxyCookie.includes('Domain=')) {
-      // Remove Domain attribute to use current domain
-      fixedCookie = proxyCookie.replace(/;\s*Domain=[^;]+/gi, '');
+    // Get all Set-Cookie headers from origin response
+    const originSetCookies = proxyResponse.headers.getSetCookie();
+    
+    // Check if client request has ugreen-proxy-token
+    const clientCookies = request.headers.get('Cookie') || '';
+    const hasToken = clientCookies.includes('ugreen-proxy-token');
+    
+    // Build final Set-Cookie array with deduplication
+    const finalSetCookies = [];
+    let hasOriginToken = false;
+    
+    // First, add all origin Set-Cookie headers (passthrough)
+    // If origin sends new ugreen-proxy-token, use it and update cache
+    for (const cookie of originSetCookies) {
+      const cookieName = cookie.split('=')[0].trim();
+      
+      if (cookieName === 'ugreen-proxy-token') {
+        // Origin sent new token, use it instead of cached one
+        hasOriginToken = true;
+        finalSetCookies.push(fixCookieDomain(cookie));
+        
+        // Update cache with new token (async, don't wait)
+        ctx.waitUntil(env.UGLINK_CACHE.put(cookieCacheKey, fixCookieDomain(cookie), { expirationTtl: 3600 }));
+      } else {
+        // Add other cookies directly
+        finalSetCookies.push(fixCookieDomain(cookie));
+      }
     }
-    responseHeaders.set('Set-Cookie', fixedCookie);
+    //客户端没有token，且源站也没有新token，则添加缓存的token
+    if (!hasToken && !hasOriginToken) {
+        finalSetCookies.push(fixCookieDomain(proxyCookie));
+    } 
+    //如果源站有新token（无论客户端有没有token），都不添加缓存的token，直接用origin的token（已经在上面添加了）
+    //客户端没有token，且源站没有要求发其它Set-Cookie，则发缓存token，已添加
+    //客户端有token，且源站没有要求发其它Set-Cookie（finalSetCookies为空），说明token没变，就不会触发删除Set-Cookie，不用动作
+
+    // Set all cookies in response
+    if (finalSetCookies.length > 0) {
+      responseHeaders.delete('Set-Cookie');
+      for (const cookie of finalSetCookies) {
+        responseHeaders.append('Set-Cookie', cookie);
+      }
+    }
 
     return new Response(proxyResponse.body, {
       status: proxyResponse.status,
