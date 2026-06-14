@@ -312,9 +312,14 @@ export default {
       finalSetCookies.push('__Host-nc_sameSiteCookiestrict=true; Path=/; Secure; SameSite=Lax');
       finalSetCookies.push('__Host-nc_sameSiteCookielax=true; Path=/; Secure; SameSite=Lax');
 
+      console.log(`UGLINK Worker: Sending ${finalSetCookies.length} Set-Cookie headers to browser for ${request.method} ${url.pathname}`);
+      
       for (const cookie of finalSetCookies) {
         responseHeaders.append('Set-Cookie', cookie);
+        console.log(`UGLINK Worker: -> Set-Cookie to browser: ${cookie.substring(0, 150)}...`);
       }
+    } else {
+      console.log(`UGLINK Worker: NO Set-Cookie headers sent to browser for ${request.method} ${url.pathname}`);
     }
 
     return new Response(proxyResponse.body, {
