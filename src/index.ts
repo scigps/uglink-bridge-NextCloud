@@ -162,7 +162,14 @@ export default {
 
     // Forward Set-Cookie header to browser
     const responseHeaders = new Headers(proxyResponse.headers);
-    responseHeaders.set('Set-Cookie', proxyCookie);
+    
+    // Parse and fix cookie domain to match current request domain
+    let fixedCookie = proxyCookie;
+    if (proxyCookie.includes('Domain=')) {
+      // Remove Domain attribute to use current domain
+      fixedCookie = proxyCookie.replace(/;\s*Domain=[^;]+/gi, '');
+    }
+    responseHeaders.set('Set-Cookie', fixedCookie);
 
     return new Response(proxyResponse.body, {
       status: proxyResponse.status,
