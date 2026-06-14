@@ -118,7 +118,7 @@ export default {
         // Log the redirect response for debugging
         console.log("Redirect Response:", redirectResponse);
         const redirectHtml = await redirectResponse.text();
-        const cookieMatch = redirectHtml.match(/document\.cookie\s*=\s*['"]([^'"]*ugreen-proxy-token=[^'"]*)['"]/i);
+        const cookieMatch = redirectHtml.match(/document\.cookie\s*=\s*'([^']+)'/);
         const setCookie = cookieMatch ? cookieMatch[1] : null;
         // Log the parsed cookie string for debugging
         console.log("Parsed Set-Cookie:", setCookie);
