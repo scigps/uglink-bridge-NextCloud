@@ -157,10 +157,20 @@ export default {
       if (key.toLowerCase() === 'host') continue; // Don't forward host
       if (key.toLowerCase() === 'cookie') continue; // Will handle cookie separately
       if (key.toLowerCase().startsWith('cf-')) continue; // Don't forward Cloudflare headers
-      if (key.toLowerCase().startsWith('x-forwarded-')) continue; // Don't forward forwarded headers
       proxyHeaders.set(key, value);
     }
     proxyHeaders.set('Host', new URL(proxyOrigin).host);
+    
+    // Add X-Forwarded headers for NextCloud to recognize the proxy
+    const forwardedProto = request.headers.get('X-Forwarded-Proto') || 'https';
+    proxyHeaders.set('X-Forwarded-Proto', forwardedProto);
+    proxyHeaders.set('X-Forwarded-Host', new URL(request.url).host);
+    proxyHeaders.set('X-Forwarded-For', request.headers.get('CF-Connecting-IP') || '');
+    
+    // Rewrite Origin and Referer headers for NextCloud CSRF validation
+    const originUrl = new URL(request.url);
+    proxyHeaders.set('Origin', originUrl.origin);
+    proxyHeaders.set('Referer', originUrl.href);
     
     // Merge client cookies with cached ugreen-proxy-token
     const clientCookies = request.headers.get('Cookie') || '';
@@ -206,6 +216,14 @@ export default {
     console.log(`UGLINK Worker: Merged Cookie length: ${mergedCookie.length}, first 150 chars: ${mergedCookie.substring(0, 150)}...`);
     console.log(`UGLINK Worker: Full Merged Cookie: ${mergedCookie}`);
     console.log(`UGLINK Worker: Request Method: ${request.method}, Path: ${url.pathname}`);
+    
+    // Debug logging for login flow
+    if (url.pathname.includes('/login') && request.method === 'POST') {
+      console.log("UGLINK Worker: DEBUG - Login POST request detected");
+      console.log("UGLINK Worker: DEBUG - Request body type:", typeof request.body);
+      console.log("UGLINK Worker: DEBUG - Request headers:", Object.fromEntries(request.headers));
+      console.log("UGLINK Worker: DEBUG - Proxy headers:", Object.fromEntries(proxyHeaders));
+    }
     
     const proxyResponse = await fetch(proxyUrl, {
       method: request.method,
@@ -296,19 +314,42 @@ export default {
     // Convert map to array
     const finalSetCookies = Array.from(cookieMap.values());
     
-    //客户端没有token，且源站也没有新token，则添加缓存的token
+    // 客户端没有token，且源站也没有新token，则添加缓存的token
     if (!hasToken && !hasOriginToken) {
       finalSetCookies.push(fixCookieDomain(proxyCookie));
     }
-    //如果源站有新token（无论客户端有没有token），都不添加缓存的token，直接用origin的token（已经在上面添加了）
-    //客户端没有token，且源站没有要求发其它Set-Cookie，则发缓存token，已添加
-    //客户端有token，且源站没有要求发其它Set-Cookie（finalSetCookies为空），说明token没变，就不会触发删除Set-Cookie，不用动作
+    // 如果源站有新token（无论客户端有没有token），都不添加缓存的token，直接用origin的token（已经在上面添加了）
+    // 客户端没有token，且源站没有要求发其它Set-Cookie，则发缓存token，已添加
+    // 客户端有token，且源站没有要求发其它Set-Cookie（finalSetCookies为空），说明token没变，就不会触发删除Set-Cookie，不用动作
+    
+    // 对于NextCloud登录场景，确保正确的session cookie被传递
+    // 检查是否是登录相关路径
+    const isLoginPath = url.pathname.includes('/login') || url.pathname.includes('/remote.php/webdav');
+    
+    // 为登录请求添加必要的cookie（包括session cookie）
+    if (isLoginPath && request.method === 'POST') {
+      console.log("UGLINK Worker: Handling login POST request, ensuring session cookies are preserved");
+      // 确保session cookie在登录POST请求中被正确传递
+      const sessionCookieName = 'oc1td4su917a'; // NextCloud的session cookie名
+      const hasSessionCookie = finalSetCookies.some(c => c.startsWith(sessionCookieName + '='));
+      
+      if (!hasSessionCookie && proxyCookie) {
+        // 从proxyCookie中提取session cookie
+        const sessionCookieMatch = proxyCookie.match(new RegExp(`${sessionCookieName}=([^;]+)`));
+        if (sessionCookieMatch) {
+          const sessionCookieValue = sessionCookieMatch[1];
+          const sessionCookie = `${sessionCookieName}=${sessionCookieValue}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+          finalSetCookies.push(sessionCookie);
+          console.log("UGLINK Worker: Added session cookie for login POST");
+        }
+      }
+    }
     
     // Set all cookies in response
     if (finalSetCookies.length > 0) {
       responseHeaders.delete('Set-Cookie');
 
-      //添加浏览器 SameSite Cookie - 使用 Lax 以允许 POST 表单提交时携带
+      // 添加浏览器 SameSite Cookie - 使用 Lax 以允许 POST 表单提交时携带
       finalSetCookies.push('__Host-nc_sameSiteCookiestrict=true; Path=/; Secure; SameSite=Lax');
       finalSetCookies.push('__Host-nc_sameSiteCookielax=true; Path=/; Secure; SameSite=Lax');
 
