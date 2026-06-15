@@ -1,4 +1,4 @@
-name = "nextcloud"
+name = "nc"
 main = "dist/index.js"
 compatibility_date = "2025-04-09"
 compatibility_flags = ["nodejs_compat"]
