@@ -113,10 +113,11 @@ export default {
 
       if (data.code === 200) {
         const redirectUrl = data.data.redirect_url;
-
         const redirectResponse = await fetch(redirectUrl, { redirect: 'manual' });
-
-        const setCookie = redirectResponse.headers.get('set-cookie');
+        const redirectHtml = await redirectResponse.text();
+        // Extract cookie from JavaScript document.cookie assignment
+        const cookieMatch = redirectHtml.match(/document\.cookie\s*=\s*'([^']+)'/);
+        const setCookie = cookieMatch ? cookieMatch[1] : null;
 
         if (setCookie) {
           proxyCookie = setCookie;
@@ -125,8 +126,8 @@ export default {
           await env.UGLINK_CACHE.put(cookieCacheKey, proxyCookie, { expirationTtl: 3600 });
           await env.UGLINK_CACHE.put(originCacheKey, proxyOrigin, { expirationTtl: 3600 });
         } else {
-          console.error('UGLINK Worker: No set-cookie in redirect response');
-          return new Response('No set-cookie in redirect response', { status: 500 });
+          console.error('UGLINK Worker: No set-cookie in redirect response body');
+          return new Response('No set-cookie in redirect response body', { status: 500 });
         }
       } else {
         console.error('UGLINK Worker: API returned error', { msg: data.msg });
@@ -143,7 +144,7 @@ export default {
     for (const [key, value] of request.headers) {
       if (key.toLowerCase() === 'host') continue; // Don't forward host
       if (key.toLowerCase().startsWith('cf-')) continue; // Don't forward Cloudflare headers
-      if (key.toLowerCase().startsWith('x-forwarded-')) continue; // Don't forward forwarded headers
+      // if (key.toLowerCase().startsWith('x-forwarded-')) continue; // Don't forward forwarded headers
       proxyHeaders.set(key, value);
     }
     proxyHeaders.set('Host', new URL(proxyOrigin).host);

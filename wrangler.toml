@@ -2,14 +2,20 @@ name = "uglink-worker"
 main = "dist/index.js"
 compatibility_date = "2025-04-09"
 compatibility_flags = ["nodejs_compat"]
-[vars]
-BASE_URL = ""
-PORT = ""
-USERNAME = ""
+
+# Please set vars on Cloudflare dashboard
+# [vars]
+# BASE_URL = ""
+# PORT = ""
+# USERNAME = ""
 
 [[kv_namespaces]]
 binding = "UGLINK_CACHE"
-id = ""  # Replace with your actual KV namespace ID from Cloudflare dashboard
+id = "5a2e19ef3329467ba9d1c29d6d8fd450"  # Replace with your actual KV namespace ID from Cloudflare dashboard
+
+[observability]
+enabled = true
 
 [observability.logs]
-enabled = true
+invocation_logs = true
+head_sampling_rate = 1
