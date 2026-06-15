@@ -129,7 +129,7 @@ export default {
         const cookieMatch = redirectHtml.match(/document\.cookie\s*=\s*'([^']+)'/);
         const setCookie = cookieMatch ? cookieMatch[1] : null;
         // Log the parsed cookie string for debugging
-        console.log("Parsed Set-Cookie:", setCookie);
+        // console.log("Parsed Set-Cookie:", setCookie);
           
         if (setCookie) {
           proxyCookie = fixCookieDomain(setCookie);
@@ -176,54 +176,36 @@ export default {
     const clientCookies = request.headers.get('Cookie') || '';
     let mergedCookie = clientCookies;
     
-    console.log(`UGLINK Worker: Client Cookies (first 100 chars): ${clientCookies.substring(0, 100)}...`);
-    console.log(`UGLINK Worker: Cached proxyCookie (first 100 chars): ${proxyCookie ? proxyCookie.substring(0, 100) : 'NULL'}...`);
-    console.log(`UGLINK Worker: proxyCookie is null/undefined: ${!proxyCookie}`);
+    // console.log(`UGLINK Worker: Client Cookies (first 100 chars): ${clientCookies.substring(0, 100)}...`);
+    // console.log(`UGLINK Worker: Cached proxyCookie (first 100 chars): ${proxyCookie ? proxyCookie.substring(0, 100) : 'NULL'}...`);
+    // console.log(`UGLINK Worker: proxyCookie is null/undefined: ${!proxyCookie}`);
     
     // Ensure ugreen-proxy-token is always present for Ugreen authentication
     if (!proxyCookie) {
       console.error(`UGLINK Worker: ERROR - No cached ugreen-proxy-token in KV!`);
       mergedCookie = clientCookies;
     } else if (!clientCookies.includes('ugreen-proxy-token')) {
-      console.log(`UGLINK Worker: Client missing ugreen-proxy-token, adding from cache`);
+      // console.log(`UGLINK Worker: Client missing ugreen-proxy-token, adding from cache`);
       // Add cached token to client cookies
       mergedCookie = clientCookies ? `${clientCookies}; ${proxyCookie}` : proxyCookie;
     } else {
-      console.log(`UGLINK Worker: Client already has ugreen-proxy-token`);
-      // Client has token, but check if it matches the cached one
-      // Extract token value from client cookies and cached cookie
-      const clientTokenMatch = clientCookies.match(/ugreen-proxy-token=([^;]+)/);
-      const cachedTokenMatch = proxyCookie.match(/ugreen-proxy-token=([^;]+)/);
-      
-      if (clientTokenMatch && cachedTokenMatch) {
-        const clientToken = clientTokenMatch[1];
-        const cachedToken = cachedTokenMatch[1];
-        
-        if (clientToken !== cachedToken) {
-          console.log(`UGLINK Worker: Client token differs from cached token, using cached token`);
-          // Replace client's old token with cached new token
-          mergedCookie = clientCookies.replace(/ugreen-proxy-token=[^;]+/, 'ugreen-proxy-token=' + cachedToken);
-        } else {
-          console.log(`UGLINK Worker: Client token matches cached token, keeping client cookies`);
-          mergedCookie = clientCookies;
-        }
-      } else {
-        mergedCookie = clientCookies;
-      }
+      // 客户端已有ugreen-proxy-token，直接使用客户端cookie
+      // 源站会通过Set-Cookie更新token，无需在此比较
+      mergedCookie = clientCookies;
     }
     
     proxyHeaders.set('Cookie', mergedCookie);
-    console.log(`UGLINK Worker: Merged Cookie length: ${mergedCookie.length}, first 150 chars: ${mergedCookie.substring(0, 150)}...`);
-    console.log(`UGLINK Worker: Full Merged Cookie: ${mergedCookie}`);
-    console.log(`UGLINK Worker: Request Method: ${request.method}, Path: ${url.pathname}`);
+    // console.log(`UGLINK Worker: Merged Cookie length: ${mergedCookie.length}, first 150 chars: ${mergedCookie.substring(0, 150)}...`);
+    // console.log(`UGLINK Worker: Full Merged Cookie: ${mergedCookie}`);
+    // console.log(`UGLINK Worker: Request Method: ${request.method}, Path: ${url.pathname}`);
     
     // Debug logging for login flow
-    if (url.pathname.includes('/login') && request.method === 'POST') {
-      console.log("UGLINK Worker: DEBUG - Login POST request detected");
-      console.log("UGLINK Worker: DEBUG - Request body type:", typeof request.body);
-      console.log("UGLINK Worker: DEBUG - Request headers:", Object.fromEntries(request.headers));
-      console.log("UGLINK Worker: DEBUG - Proxy headers:", Object.fromEntries(proxyHeaders));
-    }
+    // if (url.pathname.includes('/login') && request.method === 'POST') {
+    //   console.log("UGLINK Worker: DEBUG - Login POST request detected");
+    //   console.log("UGLINK Worker: DEBUG - Request body type:", typeof request.body);
+    //   console.log("UGLINK Worker: DEBUG - Request headers:", Object.fromEntries(request.headers));
+    //   console.log("UGLINK Worker: DEBUG - Proxy headers:", Object.fromEntries(proxyHeaders));
+    // }
     
     const proxyResponse = await fetch(proxyUrl, {
       method: request.method,
@@ -232,25 +214,25 @@ export default {
       redirect: 'manual'  // Intercept redirects to rewrite Location header
     });
 
-    console.log(`UGLINK Worker: Proxy Response Status: ${proxyResponse.status}`);
+    // console.log(`UGLINK Worker: Proxy Response Status: ${proxyResponse.status}`);
     
     // Log all Set-Cookie headers from Ugreen response
-    const setCookies = proxyResponse.headers.getSetCookie();
-    if (setCookies.length > 0) {
-      console.log(`UGLINK Worker: Ugreen returned ${setCookies.length} Set-Cookie header(s)`);
-      setCookies.forEach((cookie, index) => {
-        console.log(`UGLINK Worker: Set-Cookie [${index}]: ${cookie.substring(0, 200)}...`);
-      });
-    } else {
-      console.log(`UGLINK Worker: Ugreen returned NO Set-Cookie headers for ${request.method} ${url.pathname}`);
-    }
+    // const setCookies = proxyResponse.headers.getSetCookie();
+    // if (setCookies.length > 0) {
+    //   console.log(`UGLINK Worker: Ugreen returned ${setCookies.length} Set-Cookie header(s)`);
+    //   setCookies.forEach((cookie, index) => {
+    //     console.log(`UGLINK Worker: Set-Cookie [${index}]: ${cookie.substring(0, 200)}...`);
+    //   });
+    // } else {
+    //   console.log(`UGLINK Worker: Ugreen returned NO Set-Cookie headers for ${request.method} ${url.pathname}`);
+    // }
     
     // Handle redirect responses (301, 302, 303, 307, 308)
     if ([301, 302, 303, 307, 308].includes(proxyResponse.status)) {
       const location = proxyResponse.headers.get('Location');
-      console.log(`UGLINK Worker: Redirect detected - Status: ${proxyResponse.status}, Location: ${location}`);
-      console.log(`UGLINK Worker: Request URL: ${request.url}`);
-      console.log(`UGLINK Worker: Proxy URL: ${proxyUrl}`);
+      // console.log(`UGLINK Worker: Redirect detected - Status: ${proxyResponse.status}, Location: ${location}`);
+      // console.log(`UGLINK Worker: Request URL: ${request.url}`);
+      // console.log(`UGLINK Worker: Proxy URL: ${proxyUrl}`);
       
       if (location) {
         // Rewrite Location header to use Workers domain
@@ -261,17 +243,17 @@ export default {
         // If location is absolute URL pointing to origin, rewrite to workers domain
         if (location.startsWith(originUrl.origin)) {
           newLocation = location.replace(originUrl.origin, `${workersUrl.protocol}//${workersUrl.host}`);
-          console.log(`UGLINK Worker: Rewrote absolute Location: ${location} -> ${newLocation}`);
+          // console.log(`UGLINK Worker: Rewrote absolute Location: ${location} -> ${newLocation}`);
         } else if (location.startsWith('/')) {
           // If location is relative path, keep as is (will be handled by browser through workers)
-          console.log(`UGLINK Worker: Keeping relative Location: ${location}`);
+          // console.log(`UGLINK Worker: Keeping relative Location: ${location}`);
         }
         
         // Create redirect response with rewritten Location
         const redirectHeaders = new Headers(proxyResponse.headers);
         redirectHeaders.set('Location', newLocation);
         
-        console.log(`UGLINK Worker: Returning redirect response with Location: ${newLocation}`);
+        // console.log(`UGLINK Worker: Returning redirect response with Location: ${newLocation}`);
         return new Response(null, {
           status: proxyResponse.status,
           statusText: proxyResponse.statusText,
@@ -324,43 +306,45 @@ export default {
     
     // 对于NextCloud登录场景，确保正确的session cookie被传递
     // 检查是否是登录相关路径
-    const isLoginPath = url.pathname.includes('/login') || url.pathname.includes('/remote.php/webdav');
+    // 已注释：登录已通过X-Forwarded头解决，不再需要特殊处理session cookie
+    // const isLoginPath = url.pathname.includes('/login') || url.pathname.includes('/remote.php/webdav');
     
     // 为登录请求添加必要的cookie（包括session cookie）
-    if (isLoginPath && request.method === 'POST') {
-      console.log("UGLINK Worker: Handling login POST request, ensuring session cookies are preserved");
-      // 确保session cookie在登录POST请求中被正确传递
-      const sessionCookieName = 'oc1td4su917a'; // NextCloud的session cookie名
-      const hasSessionCookie = finalSetCookies.some(c => c.startsWith(sessionCookieName + '='));
-      
-      if (!hasSessionCookie && proxyCookie) {
-        // 从proxyCookie中提取session cookie
-        const sessionCookieMatch = proxyCookie.match(new RegExp(`${sessionCookieName}=([^;]+)`));
-        if (sessionCookieMatch) {
-          const sessionCookieValue = sessionCookieMatch[1];
-          const sessionCookie = `${sessionCookieName}=${sessionCookieValue}; Path=/; Secure; HttpOnly; SameSite=Lax`;
-          finalSetCookies.push(sessionCookie);
-          console.log("UGLINK Worker: Added session cookie for login POST");
-        }
-      }
-    }
+    // if (isLoginPath && request.method === 'POST') {
+    //   // console.log("UGLINK Worker: Handling login POST request, ensuring session cookies are preserved");
+    //   // 确保session cookie在登录POST请求中被正确传递
+    //   const sessionCookieName = 'oc1td4su917a'; // NextCloud的session cookie名
+    //   const hasSessionCookie = finalSetCookies.some(c => c.startsWith(sessionCookieName + '='));
+    //   
+    //   if (!hasSessionCookie && proxyCookie) {
+    //     // 从proxyCookie中提取session cookie
+    //     const sessionCookieMatch = proxyCookie.match(new RegExp(`${sessionCookieName}=([^;]+)`));
+    //     if (sessionCookieMatch) {
+    //       const sessionCookieValue = sessionCookieMatch[1];
+    //       const sessionCookie = `${sessionCookieName}=${sessionCookieValue}; Path=/; Secure; HttpOnly; SameSite=Lax`;
+    //       finalSetCookies.push(sessionCookie);
+    //       // console.log("UGLINK Worker: Added session cookie for login POST");
+    //     }
+    //   }
+    // }
     
     // Set all cookies in response
     if (finalSetCookies.length > 0) {
       responseHeaders.delete('Set-Cookie');
 
       // 添加浏览器 SameSite Cookie - 使用 Lax 以允许 POST 表单提交时携带
-      finalSetCookies.push('__Host-nc_sameSiteCookiestrict=true; Path=/; Secure; SameSite=Lax');
-      finalSetCookies.push('__Host-nc_sameSiteCookielax=true; Path=/; Secure; SameSite=Lax');
+      // 已注释：NextCloud自身会处理SameSite，无需额外添加
+      // finalSetCookies.push('__Host-nc_sameSiteCookiestrict=true; Path=/; Secure; SameSite=Lax');
+      // finalSetCookies.push('__Host-nc_sameSiteCookielax=true; Path=/; Secure; SameSite=Lax');
 
-      console.log(`UGLINK Worker: Sending ${finalSetCookies.length} Set-Cookie headers to browser for ${request.method} ${url.pathname}`);
+      // console.log(`UGLINK Worker: Sending ${finalSetCookies.length} Set-Cookie headers to browser for ${request.method} ${url.pathname}`);
       
       for (const cookie of finalSetCookies) {
         responseHeaders.append('Set-Cookie', cookie);
-        console.log(`UGLINK Worker: -> Set-Cookie to browser: ${cookie.substring(0, 150)}...`);
+        // console.log(`UGLINK Worker: -> Set-Cookie to browser: ${cookie.substring(0, 150)}...`);
       }
     } else {
-      console.log(`UGLINK Worker: NO Set-Cookie headers sent to browser for ${request.method} ${url.pathname}`);
+      // console.log(`UGLINK Worker: NO Set-Cookie headers sent to browser for ${request.method} ${url.pathname}`);
     }
 
     return new Response(proxyResponse.body, {
