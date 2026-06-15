@@ -26,12 +26,8 @@ export default {
       const checkUrl = `${baseUrl}/ugreen/v1/verify/check?token=`;
       const checkResponse = await fetch(checkUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          username: username
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username })
       });
 
       if (!checkResponse.ok) {
@@ -40,7 +36,6 @@ export default {
       }
 
       const rsaToken = checkResponse.headers.get('x-rsa-token');
-
       if (!rsaToken) {
         console.error('UGLINK Worker: No x-rsa-token in check response');
         return new Response('No x-rsa-token in check response', { status: 500 });
@@ -61,9 +56,7 @@ export default {
       const loginUrl = `${baseUrl}/ugreen/v1/verify/login`;
       const loginResponse = await fetch(loginUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           username: username,
           password: encryptedPassword,
@@ -79,17 +72,15 @@ export default {
       }
 
       const loginJson = await loginResponse.json();
-
       if (loginJson.code !== 200) {
         console.error('UGLINK Worker: Login API error', { msg: loginJson.msg });
         return new Response('Login API error: ' + loginJson.msg, { status: 500 });
       }
 
-      // Decode public key
+      // Decode public key and encrypt token with RSA
       const encodedPublicKey = loginJson.data.public_key;
       const decodedPublicKey = atob(encodedPublicKey);
 
-      // Encrypt token with RSA
       const encrypt = new JSEncrypt();
       encrypt.setPublicKey(decodedPublicKey);
       const encryptedToken = encrypt.encrypt(loginJson.data.token);
@@ -103,7 +94,8 @@ export default {
         ugreenToken: encryptedToken,
         securityKey: loginJson.data.token_id
       };
-      // Now fetch docker token with headers
+
+      // Fetch docker token with headers
       const apiUrl = `${baseUrl}/ugreen/v1/gateway/proxy/dockerToken?port=${port}`;
       const response = await fetch(apiUrl, {
         headers: {
@@ -121,16 +113,13 @@ export default {
 
       if (data.code === 200) {
         const redirectUrl = data.data.redirect_url;
-
         const redirectResponse = await fetch(redirectUrl, { redirect: 'manual' });
         const redirectHtml = await redirectResponse.text();
-        
+
         // Extract all cookies from document.cookie assignment
         const cookieMatch = redirectHtml.match(/document\.cookie\s*=\s*'([^']+)'/);
         const setCookie = cookieMatch ? cookieMatch[1] : null;
-        // Log the parsed cookie string for debugging
-        // console.log("Parsed Set-Cookie:", setCookie);
-          
+
         if (setCookie) {
           proxyCookie = fixCookieDomain(setCookie);
           proxyOrigin = new URL(redirectUrl).origin;
@@ -154,59 +143,39 @@ export default {
     // Filter and set headers for proxy
     const proxyHeaders = new Headers();
     for (const [key, value] of request.headers) {
-      if (key.toLowerCase() === 'host') continue; // Don't forward host
-      if (key.toLowerCase() === 'cookie') continue; // Will handle cookie separately
-      if (key.toLowerCase().startsWith('cf-')) continue; // Don't forward Cloudflare headers
+      if (key.toLowerCase() === 'host') continue;
+      if (key.toLowerCase() === 'cookie') continue;
+      if (key.toLowerCase().startsWith('cf-')) continue;
       proxyHeaders.set(key, value);
     }
     proxyHeaders.set('Host', new URL(proxyOrigin).host);
-    
+
     // Add X-Forwarded headers for NextCloud to recognize the proxy
     const forwardedProto = request.headers.get('X-Forwarded-Proto') || 'https';
     proxyHeaders.set('X-Forwarded-Proto', forwardedProto);
     proxyHeaders.set('X-Forwarded-Host', new URL(request.url).host);
     proxyHeaders.set('X-Forwarded-For', request.headers.get('CF-Connecting-IP') || '');
-    
+
     // Rewrite Origin and Referer headers for NextCloud CSRF validation
     const originUrl = new URL(request.url);
     proxyHeaders.set('Origin', originUrl.origin);
     proxyHeaders.set('Referer', originUrl.href);
-    
+
     // Merge client cookies with cached ugreen-proxy-token
     const clientCookies = request.headers.get('Cookie') || '';
     let mergedCookie = clientCookies;
-    
-    // console.log(`UGLINK Worker: Client Cookies (first 100 chars): ${clientCookies.substring(0, 100)}...`);
-    // console.log(`UGLINK Worker: Cached proxyCookie (first 100 chars): ${proxyCookie ? proxyCookie.substring(0, 100) : 'NULL'}...`);
-    // console.log(`UGLINK Worker: proxyCookie is null/undefined: ${!proxyCookie}`);
-    
+
     // Ensure ugreen-proxy-token is always present for Ugreen authentication
     if (!proxyCookie) {
-      console.error(`UGLINK Worker: ERROR - No cached ugreen-proxy-token in KV!`);
+      console.error('UGLINK Worker: ERROR - No cached ugreen-proxy-token in KV!');
       mergedCookie = clientCookies;
     } else if (!clientCookies.includes('ugreen-proxy-token')) {
-      // console.log(`UGLINK Worker: Client missing ugreen-proxy-token, adding from cache`);
       // Add cached token to client cookies
       mergedCookie = clientCookies ? `${clientCookies}; ${proxyCookie}` : proxyCookie;
-    } else {
-      // 客户端已有ugreen-proxy-token，直接使用客户端cookie
-      // 源站会通过Set-Cookie更新token，无需在此比较
-      mergedCookie = clientCookies;
     }
-    
+
     proxyHeaders.set('Cookie', mergedCookie);
-    // console.log(`UGLINK Worker: Merged Cookie length: ${mergedCookie.length}, first 150 chars: ${mergedCookie.substring(0, 150)}...`);
-    // console.log(`UGLINK Worker: Full Merged Cookie: ${mergedCookie}`);
-    // console.log(`UGLINK Worker: Request Method: ${request.method}, Path: ${url.pathname}`);
-    
-    // Debug logging for login flow
-    // if (url.pathname.includes('/login') && request.method === 'POST') {
-    //   console.log("UGLINK Worker: DEBUG - Login POST request detected");
-    //   console.log("UGLINK Worker: DEBUG - Request body type:", typeof request.body);
-    //   console.log("UGLINK Worker: DEBUG - Request headers:", Object.fromEntries(request.headers));
-    //   console.log("UGLINK Worker: DEBUG - Proxy headers:", Object.fromEntries(proxyHeaders));
-    // }
-    
+
     const proxyResponse = await fetch(proxyUrl, {
       method: request.method,
       headers: proxyHeaders,
@@ -214,46 +183,25 @@ export default {
       redirect: 'manual'  // Intercept redirects to rewrite Location header
     });
 
-    // console.log(`UGLINK Worker: Proxy Response Status: ${proxyResponse.status}`);
-    
-    // Log all Set-Cookie headers from Ugreen response
-    // const setCookies = proxyResponse.headers.getSetCookie();
-    // if (setCookies.length > 0) {
-    //   console.log(`UGLINK Worker: Ugreen returned ${setCookies.length} Set-Cookie header(s)`);
-    //   setCookies.forEach((cookie, index) => {
-    //     console.log(`UGLINK Worker: Set-Cookie [${index}]: ${cookie.substring(0, 200)}...`);
-    //   });
-    // } else {
-    //   console.log(`UGLINK Worker: Ugreen returned NO Set-Cookie headers for ${request.method} ${url.pathname}`);
-    // }
-    
     // Handle redirect responses (301, 302, 303, 307, 308)
     if ([301, 302, 303, 307, 308].includes(proxyResponse.status)) {
       const location = proxyResponse.headers.get('Location');
-      // console.log(`UGLINK Worker: Redirect detected - Status: ${proxyResponse.status}, Location: ${location}`);
-      // console.log(`UGLINK Worker: Request URL: ${request.url}`);
-      // console.log(`UGLINK Worker: Proxy URL: ${proxyUrl}`);
-      
+
       if (location) {
         // Rewrite Location header to use Workers domain
-        const originUrl = new URL(proxyOrigin);
+        const originUrlObj = new URL(proxyOrigin);
         const workersUrl = new URL(request.url);
-        
+
         let newLocation = location;
         // If location is absolute URL pointing to origin, rewrite to workers domain
-        if (location.startsWith(originUrl.origin)) {
-          newLocation = location.replace(originUrl.origin, `${workersUrl.protocol}//${workersUrl.host}`);
-          // console.log(`UGLINK Worker: Rewrote absolute Location: ${location} -> ${newLocation}`);
-        } else if (location.startsWith('/')) {
-          // If location is relative path, keep as is (will be handled by browser through workers)
-          // console.log(`UGLINK Worker: Keeping relative Location: ${location}`);
+        if (location.startsWith(originUrlObj.origin)) {
+          newLocation = location.replace(originUrlObj.origin, `${workersUrl.protocol}//${workersUrl.host}`);
         }
-        
+
         // Create redirect response with rewritten Location
         const redirectHeaders = new Headers(proxyResponse.headers);
         redirectHeaders.set('Location', newLocation);
-        
-        // console.log(`UGLINK Worker: Returning redirect response with Location: ${newLocation}`);
+
         return new Response(null, {
           status: proxyResponse.status,
           statusText: proxyResponse.statusText,
@@ -264,27 +212,24 @@ export default {
 
     // Forward all Set-Cookie headers from origin server to browser
     const responseHeaders = new Headers(proxyResponse.headers);
-    
-    // Get all Set-Cookie headers from origin response
     const originSetCookies = proxyResponse.headers.getSetCookie();
-    
-    // Check if client request has ugreen-proxy-token (reuse existing clientCookies variable)
+
+    // Check if client request has ugreen-proxy-token
     const hasToken = clientCookies.includes('ugreen-proxy-token');
-    
+
     // Build final Set-Cookie map with deduplication (keep last value for each cookie name)
     const cookieMap = new Map<string, string>();
     let hasOriginToken = false;
-    
-    // First, add all origin Set-Cookie headers (passthrough)
+
+    // Add all origin Set-Cookie headers (passthrough)
     // If origin sends new ugreen-proxy-token, use it and update cache
     for (const cookie of originSetCookies) {
       const cookieName = cookie.split('=')[0].trim();
-      
+
       if (cookieName === 'ugreen-proxy-token') {
         // Origin sent new token, use it instead of cached one
         hasOriginToken = true;
         cookieMap.set(cookieName, fixCookieDomain(cookie));
-        
         // Update cache with new token (async, don't wait)
         ctx.waitUntil(env.UGLINK_CACHE.put(cookieCacheKey, fixCookieDomain(cookie), { expirationTtl: 3600 }));
       } else {
@@ -292,59 +237,21 @@ export default {
         cookieMap.set(cookieName, fixCookieDomain(cookie));
       }
     }
-    
+
     // Convert map to array
     const finalSetCookies = Array.from(cookieMap.values());
-    
-    // 客户端没有token，且源站也没有新token，则添加缓存的token
+
+    // Add cached token if client doesn't have it and origin didn't send new one
     if (!hasToken && !hasOriginToken) {
       finalSetCookies.push(fixCookieDomain(proxyCookie));
     }
-    // 如果源站有新token（无论客户端有没有token），都不添加缓存的token，直接用origin的token（已经在上面添加了）
-    // 客户端没有token，且源站没有要求发其它Set-Cookie，则发缓存token，已添加
-    // 客户端有token，且源站没有要求发其它Set-Cookie（finalSetCookies为空），说明token没变，就不会触发删除Set-Cookie，不用动作
-    
-    // 对于NextCloud登录场景，确保正确的session cookie被传递
-    // 检查是否是登录相关路径
-    // 已注释：登录已通过X-Forwarded头解决，不再需要特殊处理session cookie
-    // const isLoginPath = url.pathname.includes('/login') || url.pathname.includes('/remote.php/webdav');
-    
-    // 为登录请求添加必要的cookie（包括session cookie）
-    // if (isLoginPath && request.method === 'POST') {
-    //   // console.log("UGLINK Worker: Handling login POST request, ensuring session cookies are preserved");
-    //   // 确保session cookie在登录POST请求中被正确传递
-    //   const sessionCookieName = 'oc1td4su917a'; // NextCloud的session cookie名
-    //   const hasSessionCookie = finalSetCookies.some(c => c.startsWith(sessionCookieName + '='));
-    //   
-    //   if (!hasSessionCookie && proxyCookie) {
-    //     // 从proxyCookie中提取session cookie
-    //     const sessionCookieMatch = proxyCookie.match(new RegExp(`${sessionCookieName}=([^;]+)`));
-    //     if (sessionCookieMatch) {
-    //       const sessionCookieValue = sessionCookieMatch[1];
-    //       const sessionCookie = `${sessionCookieName}=${sessionCookieValue}; Path=/; Secure; HttpOnly; SameSite=Lax`;
-    //       finalSetCookies.push(sessionCookie);
-    //       // console.log("UGLINK Worker: Added session cookie for login POST");
-    //     }
-    //   }
-    // }
-    
+
     // Set all cookies in response
     if (finalSetCookies.length > 0) {
       responseHeaders.delete('Set-Cookie');
-
-      // 添加浏览器 SameSite Cookie - 使用 Lax 以允许 POST 表单提交时携带
-      // 已注释：NextCloud自身会处理SameSite，无需额外添加
-      // finalSetCookies.push('__Host-nc_sameSiteCookiestrict=true; Path=/; Secure; SameSite=Lax');
-      // finalSetCookies.push('__Host-nc_sameSiteCookielax=true; Path=/; Secure; SameSite=Lax');
-
-      // console.log(`UGLINK Worker: Sending ${finalSetCookies.length} Set-Cookie headers to browser for ${request.method} ${url.pathname}`);
-      
       for (const cookie of finalSetCookies) {
         responseHeaders.append('Set-Cookie', cookie);
-        // console.log(`UGLINK Worker: -> Set-Cookie to browser: ${cookie.substring(0, 150)}...`);
       }
-    } else {
-      // console.log(`UGLINK Worker: NO Set-Cookie headers sent to browser for ${request.method} ${url.pathname}`);
     }
 
     return new Response(proxyResponse.body, {
