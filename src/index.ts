@@ -148,6 +148,16 @@ export default {
       proxyHeaders.set(key, value);
     }
     proxyHeaders.set('Host', new URL(proxyOrigin).host);
+
+    // Add X-Forwarded headers for NextCloud to recognize the proxy
+    proxyHeaders.set('X-Forwarded-Proto', request.headers.get('X-Forwarded-Proto') || 'https');
+    proxyHeaders.set('X-Forwarded-Host', url.host);
+    proxyHeaders.set('X-Forwarded-For', request.headers.get('CF-Connecting-IP') || '');
+
+    // Rewrite Origin and Referer headers for NextCloud CSRF validation
+    proxyHeaders.set('Origin', url.origin);
+    proxyHeaders.set('Referer', url.href);
+
     proxyHeaders.set('Cookie', proxyCookie);
 
     const proxyResponse = await fetch(proxyUrl, {
