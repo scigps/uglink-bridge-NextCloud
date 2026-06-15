@@ -158,12 +158,19 @@ export default {
     proxyHeaders.set('Origin', url.origin);
     proxyHeaders.set('Referer', url.href);
 
-    proxyHeaders.set('Cookie', proxyCookie);
+    // Ensure ugreen-proxy-token is always present for Ugreen authentication
+    const clientCookies = request.headers.get('Cookie') || '';
+    let mergedCookie = clientCookies;
+    if (proxyCookie && !clientCookies.includes('ugreen-proxy-token')) {
+      mergedCookie = clientCookies ? `${clientCookies}; ${proxyCookie}` : proxyCookie;
+    }
+    proxyHeaders.set('Cookie', mergedCookie);
 
     const proxyResponse = await fetch(proxyUrl, {
       method: request.method,
       headers: proxyHeaders,
-      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined
+      body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
+      redirect: 'manual'  // Intercept redirects to rewrite Location header
     });
 
     return proxyResponse;
