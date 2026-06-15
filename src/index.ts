@@ -21,10 +21,10 @@ export default {
     let proxyCookie = await env.UGLINK_CACHE.get(cookieCacheKey);
     let proxyOrigin = await env.UGLINK_CACHE.get(originCacheKey);
 
+    // Ugreen authentication flow - only runs when cache is empty
     if (!proxyCookie) {
       // First get the encryption public key
-      const checkUrl = `${baseUrl}/ugreen/v1/verify/check?token=`;
-      const checkResponse = await fetch(checkUrl, {
+      const checkResponse = await fetch(`${baseUrl}/ugreen/v1/verify/check?token=`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username: username })
@@ -41,10 +41,9 @@ export default {
         return new Response('No x-rsa-token in check response', { status: 500 });
       }
 
-      const encryptionPublicKey = atob(rsaToken);
-      // Encrypt password with the fetched public key
+      // Encrypt password with RSA public key
       const encryptPassword = new JSEncrypt();
-      encryptPassword.setPublicKey(encryptionPublicKey);
+      encryptPassword.setPublicKey(atob(rsaToken));
       const encryptedPassword = encryptPassword.encrypt(rawPassword);
 
       if (!encryptedPassword) {
@@ -52,9 +51,8 @@ export default {
         return new Response('Failed to encrypt password', { status: 500 });
       }
 
-      // Login to get session
-      const loginUrl = `${baseUrl}/ugreen/v1/verify/login`;
-      const loginResponse = await fetch(loginUrl, {
+      // Login to Ugreen with encrypted password
+      const loginResponse = await fetch(`${baseUrl}/ugreen/v1/verify/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -77,12 +75,9 @@ export default {
         return new Response('Login API error: ' + loginJson.msg, { status: 500 });
       }
 
-      // Decode public key and encrypt token with RSA
-      const encodedPublicKey = loginJson.data.public_key;
-      const decodedPublicKey = atob(encodedPublicKey);
-
+      // Encrypt token with second RSA key from login response
       const encrypt = new JSEncrypt();
-      encrypt.setPublicKey(decodedPublicKey);
+      encrypt.setPublicKey(atob(loginJson.data.public_key));
       const encryptedToken = encrypt.encrypt(loginJson.data.token);
 
       if (!encryptedToken) {
@@ -90,39 +85,33 @@ export default {
         return new Response('Failed to encrypt token', { status: 500 });
       }
 
-      const loginData = {
-        ugreenToken: encryptedToken,
-        securityKey: loginJson.data.token_id
-      };
-
-      // Fetch docker token with headers
-      const apiUrl = `${baseUrl}/ugreen/v1/gateway/proxy/dockerToken?port=${port}`;
-      const response = await fetch(apiUrl, {
+      // Fetch docker token using encrypted credentials
+      const tokenResponse = await fetch(`${baseUrl}/ugreen/v1/gateway/proxy/dockerToken?port=${port}`, {
         headers: {
-          'X-Ugreen-Token': loginData.ugreenToken,
-          'X-Ugreen-Security-Key': loginData.securityKey
+          'X-Ugreen-Token': encryptedToken,
+          'X-Ugreen-Security-Key': loginJson.data.token_id
         }
       });
 
-      if (!response.ok) {
-        console.error('UGLINK Worker: Failed to fetch docker token', { status: response.status });
+      if (!tokenResponse.ok) {
+        console.error('UGLINK Worker: Failed to fetch docker token', { status: tokenResponse.status });
         return new Response('Failed to fetch docker token', { status: 500 });
       }
 
-      const data = await response.json();
+      const data = await tokenResponse.json();
 
       if (data.code === 200) {
-        const redirectUrl = data.data.redirect_url;
-        const redirectResponse = await fetch(redirectUrl, { redirect: 'manual' });
+        // Fetch redirect URL to extract proxy token cookie
+        const redirectResponse = await fetch(data.data.redirect_url, { redirect: 'manual' });
         const redirectHtml = await redirectResponse.text();
 
-        // Extract all cookies from document.cookie assignment
+        // Extract cookie from JavaScript document.cookie assignment
         const cookieMatch = redirectHtml.match(/document\.cookie\s*=\s*'([^']+)'/);
         const setCookie = cookieMatch ? cookieMatch[1] : null;
 
         if (setCookie) {
           proxyCookie = fixCookieDomain(setCookie);
-          proxyOrigin = new URL(redirectUrl).origin;
+          proxyOrigin = new URL(data.data.redirect_url).origin;
           // Cache proxy cookie and origin for 1 hour
           await env.UGLINK_CACHE.put(cookieCacheKey, proxyCookie, { expirationTtl: 3600 });
           await env.UGLINK_CACHE.put(originCacheKey, proxyOrigin, { expirationTtl: 3600 });
@@ -136,46 +125,37 @@ export default {
       }
     }
 
-    // Reverse proxy to the cached origin with the cookie
+    // Build proxy URL from cached origin
     const url = new URL(request.url);
     const proxyUrl = proxyOrigin + url.pathname + url.search;
 
-    // Filter and set headers for proxy
+    // Filter and set headers for proxy request
     const proxyHeaders = new Headers();
     for (const [key, value] of request.headers) {
-      if (key.toLowerCase() === 'host') continue;
-      if (key.toLowerCase() === 'cookie') continue;
+      if (['host', 'cookie'].includes(key.toLowerCase())) continue;
       if (key.toLowerCase().startsWith('cf-')) continue;
       proxyHeaders.set(key, value);
     }
     proxyHeaders.set('Host', new URL(proxyOrigin).host);
 
     // Add X-Forwarded headers for NextCloud to recognize the proxy
-    const forwardedProto = request.headers.get('X-Forwarded-Proto') || 'https';
-    proxyHeaders.set('X-Forwarded-Proto', forwardedProto);
-    proxyHeaders.set('X-Forwarded-Host', new URL(request.url).host);
+    proxyHeaders.set('X-Forwarded-Proto', request.headers.get('X-Forwarded-Proto') || 'https');
+    proxyHeaders.set('X-Forwarded-Host', url.host);
     proxyHeaders.set('X-Forwarded-For', request.headers.get('CF-Connecting-IP') || '');
 
     // Rewrite Origin and Referer headers for NextCloud CSRF validation
-    const originUrl = new URL(request.url);
-    proxyHeaders.set('Origin', originUrl.origin);
-    proxyHeaders.set('Referer', originUrl.href);
-
-    // Merge client cookies with cached ugreen-proxy-token
-    const clientCookies = request.headers.get('Cookie') || '';
-    let mergedCookie = clientCookies;
+    proxyHeaders.set('Origin', url.origin);
+    proxyHeaders.set('Referer', url.href);
 
     // Ensure ugreen-proxy-token is always present for Ugreen authentication
-    if (!proxyCookie) {
-      console.error('UGLINK Worker: ERROR - No cached ugreen-proxy-token in KV!');
-      mergedCookie = clientCookies;
-    } else if (!clientCookies.includes('ugreen-proxy-token')) {
-      // Add cached token to client cookies
+    const clientCookies = request.headers.get('Cookie') || '';
+    let mergedCookie = clientCookies;
+    if (proxyCookie && !clientCookies.includes('ugreen-proxy-token')) {
       mergedCookie = clientCookies ? `${clientCookies}; ${proxyCookie}` : proxyCookie;
     }
-
     proxyHeaders.set('Cookie', mergedCookie);
 
+    // Forward request to origin server
     const proxyResponse = await fetch(proxyUrl, {
       method: request.method,
       headers: proxyHeaders,
@@ -183,63 +163,42 @@ export default {
       redirect: 'manual'  // Intercept redirects to rewrite Location header
     });
 
-    // Handle redirect responses (301, 302, 303, 307, 308)
-    if ([301, 302, 303, 307, 308].includes(proxyResponse.status)) {
-      const location = proxyResponse.headers.get('Location');
+    // Handle redirect responses - rewrite Location header to use Workers domain
+    const location = proxyResponse.headers.get('Location');
+    if ([301, 302, 303, 307, 308].includes(proxyResponse.status) && location) {
+      // Rewrite absolute Location URL from origin to Workers domain
+      const originUrlObj = new URL(proxyOrigin);
+      const newLocation = location.startsWith(originUrlObj.origin)
+        ? location.replace(originUrlObj.origin, `${url.protocol}//${url.host}`)
+        : location;
 
-      if (location) {
-        // Rewrite Location header to use Workers domain
-        const originUrlObj = new URL(proxyOrigin);
-        const workersUrl = new URL(request.url);
-
-        let newLocation = location;
-        // If location is absolute URL pointing to origin, rewrite to workers domain
-        if (location.startsWith(originUrlObj.origin)) {
-          newLocation = location.replace(originUrlObj.origin, `${workersUrl.protocol}//${workersUrl.host}`);
-        }
-
-        // Create redirect response with rewritten Location
-        const redirectHeaders = new Headers(proxyResponse.headers);
-        redirectHeaders.set('Location', newLocation);
-
-        return new Response(null, {
-          status: proxyResponse.status,
-          statusText: proxyResponse.statusText,
-          headers: redirectHeaders
-        });
-      }
+      const redirectHeaders = new Headers(proxyResponse.headers);
+      redirectHeaders.set('Location', newLocation);
+      return new Response(null, {
+        status: proxyResponse.status,
+        statusText: proxyResponse.statusText,
+        headers: redirectHeaders
+      });
     }
 
     // Forward all Set-Cookie headers from origin server to browser
     const responseHeaders = new Headers(proxyResponse.headers);
     const originSetCookies = proxyResponse.headers.getSetCookie();
-
-    // Check if client request has ugreen-proxy-token
     const hasToken = clientCookies.includes('ugreen-proxy-token');
 
-    // Build final Set-Cookie map with deduplication (keep last value for each cookie name)
-    const cookieMap = new Map<string, string>();
+    // Build final Set-Cookie array - if origin sends new ugreen-proxy-token, use it and update cache
+    const finalSetCookies: string[] = [];
     let hasOriginToken = false;
 
-    // Add all origin Set-Cookie headers (passthrough)
-    // If origin sends new ugreen-proxy-token, use it and update cache
     for (const cookie of originSetCookies) {
-      const cookieName = cookie.split('=')[0].trim();
-
-      if (cookieName === 'ugreen-proxy-token') {
-        // Origin sent new token, use it instead of cached one
+      const fixedCookie = fixCookieDomain(cookie);
+      if (cookie.split('=')[0].trim() === 'ugreen-proxy-token') {
+        // Origin sent new token - use it and update cache
         hasOriginToken = true;
-        cookieMap.set(cookieName, fixCookieDomain(cookie));
-        // Update cache with new token (async, don't wait)
-        ctx.waitUntil(env.UGLINK_CACHE.put(cookieCacheKey, fixCookieDomain(cookie), { expirationTtl: 3600 }));
-      } else {
-        // Add other cookies directly (later duplicates will overwrite earlier ones)
-        cookieMap.set(cookieName, fixCookieDomain(cookie));
+        ctx.waitUntil(env.UGLINK_CACHE.put(cookieCacheKey, fixedCookie, { expirationTtl: 3600 }));
       }
+      finalSetCookies.push(fixedCookie);
     }
-
-    // Convert map to array
-    const finalSetCookies = Array.from(cookieMap.values());
 
     // Add cached token if client doesn't have it and origin didn't send new one
     if (!hasToken && !hasOriginToken) {
